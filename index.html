@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
+<title>DrawRun</title>
+<style>
+html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #fff3df; touch-action: none;
+  font-family: 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; }
+#canvas { display: block; width: 100%; height: 100%; }
+#canvas:focus { outline: none; }
+#status { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center;
+  gap: 28px; color: #2a2f4f; background: #fff3df; }
+.loading-title { margin: 0; font-size: clamp(48px, 12vw, 96px); font-weight: 900; line-height: 1.1; letter-spacing: -3px;
+  color: #ff6b5b; -webkit-text-stroke: 3px #2a2f4f; paint-order: stroke fill; }
+.loading-dots { display: flex; align-items: center; justify-content: center; gap: 14px; height: 32px; }
+.loading-dots span { width: 18px; height: 18px; border: 3px solid #2a2f4f; border-radius: 50%; background: #ff6b5b;
+  animation: loading-bounce .9s ease-in-out infinite; }
+.loading-dots span:nth-child(2) { background: #46b8f0; animation-delay: .15s; }
+.loading-dots span:nth-child(3) { background: #ffcf3f; animation-delay: .3s; }
+@keyframes loading-bounce { 0%, 70%, 100% { transform: translateY(0); } 35% { transform: translateY(-12px); } }
+#status progress { appearance: none; -webkit-appearance: none; display: block; box-sizing: border-box; width: 60%; max-width: 360px;
+  height: 36px; overflow: hidden; border: 4px solid #2a2f4f; border-radius: 18px; background: #fff; color: #46b8f0; }
+#status progress::-webkit-progress-bar { background: #fff; border-radius: 14px; }
+#status progress::-webkit-progress-value { background: #46b8f0; border-radius: 14px; }
+#status progress::-moz-progress-bar { background: #46b8f0; border-radius: 14px; }
+#status-notice { display: none; max-width: 560px; padding: 0 24px; text-align: center; font-size: 22px; white-space: pre-line; }
+
+/* 하단 배너: 위치/크기는 게임(BannerSlot)이 showBanner 로 알려준다 */
+#ad-banner { position: absolute; display: none; overflow: hidden; box-sizing: border-box; border-top: 4px solid #2a2f4f;
+  background: #f3e3c3; color: #8a7f72; font-size: 22px; align-items: center; justify-content: center; z-index: 10; }
+
+/* 보상형 광고 오버레이 (가짜 구현용) */
+#ad-reward { position: absolute; inset: 0; display: none; z-index: 20; background: rgba(42,47,79,.88); color: #2a2f4f;
+  align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; }
+.ad-card { display: flex; flex-direction: column; align-items: center; gap: 28px; width: min(100%, 520px); padding: 36px 24px;
+  box-sizing: border-box; background: #fff; border: 4px solid #2a2f4f; border-radius: 28px; text-align: center; }
+.ad-title { padding: 10px 24px; border: 4px solid #2a2f4f; border-radius: 28px; background: #ffcf3f; font-size: 26px; font-weight: 900; }
+#ad-reward-text { font-size: clamp(28px, 6vw, 40px); line-height: 1.4; font-weight: 900; word-break: keep-all; }
+#ad-reward-countdown { font-size: 96px; line-height: 1; font-weight: 900; color: #ff6b5b; -webkit-text-stroke: 4px #2a2f4f;
+  paint-order: stroke fill; }
+#ad-reward button { cursor: pointer; font-family: inherit; font-size: 22px; font-weight: 800; color: #2a2f4f; background: #fff;
+  min-height: 68px; padding: 12px 24px; border-radius: 22px; border: 4px solid #2a2f4f; }
+#ad-reward button:active { transform: scale(.94); background: #f3e3c3; }
+#ad-reward.is-complete button:active { background: #d9473a; }
+#ad-reward button:focus-visible { outline: 4px solid #46b8f0; outline-offset: 6px; }
+#ad-reward.is-complete button { background: #ff6b5b; color: #fff; }
+@media (prefers-reduced-motion: reduce) { .loading-dots span { animation: none; } }
+</style>
+<link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
+<link rel="apple-touch-icon" href="index.apple-touch-icon.png"/>
+
+</head>
+<body>
+<canvas id="canvas">브라우저가 HTML5 canvas 를 지원하지 않습니다.</canvas>
+<div id="status">
+  <div class="loading-title">DRAW RUN</div>
+  <div class="loading-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+  <progress id="status-progress"></progress>
+  <div id="status-notice"></div>
+</div>
+<div id="ad-banner">광고 배너 영역 (테스트)</div>
+<div id="ad-reward">
+  <div class="ad-card">
+    <div class="ad-title">광고 (테스트)</div>
+    <div id="ad-reward-countdown" aria-hidden="true"></div>
+    <div id="ad-reward-text"></div>
+    <button id="ad-reward-close">닫기 (보상 없음)</button>
+  </div>
+</div>
+
+<script>
+/*
+ * 광고 어댑터. Godot(autoload/ad_service.gd)이 window.InkAds 를 호출한다.
+ * 지금은 가짜 구현이다. 실제 광고 SDK 를 붙일 때는 아래 TODO 부분만 바꾸면 된다.
+ *   - Google H5 Games Ads: adBreak({type: 'reward', beforeReward, adViewed, adDismissed, ...})
+ *   - CrazyGames / Poki 등 포털: 각 SDK 의 rewarded / banner API
+ * 규칙: showRewarded 의 callback 은 반드시 한 번만, callback(true|false) 로 호출할 것.
+ */
+window.InkAds = (function () {
+  const banner = document.getElementById('ad-banner');
+  const reward = document.getElementById('ad-reward');
+  const rewardText = document.getElementById('ad-reward-text');
+  const rewardCountdown = document.getElementById('ad-reward-countdown');
+  const rewardClose = document.getElementById('ad-reward-close');
+  const canvas = document.getElementById('canvas');
+
+  return {
+    // x, y, w, h: 캔버스 크기 대비 비율(0~1)
+    showBanner(x, y, w, h) {
+      const r = canvas.getBoundingClientRect();
+      Object.assign(banner.style, {
+        display: 'flex',
+        left: (r.left + x * r.width) + 'px',
+        top: (r.top + y * r.height) + 'px',
+        width: (w * r.width) + 'px',
+        height: (h * r.height) + 'px',
+      });
+      // TODO: 실제 배너 SDK 를 이 div 안에 렌더링 (최초 1회만 로드하도록 주의)
+    },
+
+    hideBanner() {
+      banner.style.display = 'none';
+      // TODO: 실제 배너 SDK 숨김/정리
+    },
+
+    showRewarded(callback, seconds) {
+      // TODO: 실제 보상형 광고 SDK 호출로 교체. 아래는 가짜 카운트다운.
+      let left = Math.ceil(seconds || 15);
+      let done = false;
+      reward.style.display = 'flex';
+      reward.classList.remove('is-complete');
+      rewardCountdown.textContent = String(left);
+      rewardClose.textContent = '닫기 (보상 없음)';
+      rewardText.textContent = left + '초 후 보상이 지급됩니다';
+      const timer = setInterval(() => {
+        left -= 1;
+        rewardCountdown.textContent = String(Math.max(0, left));
+        if (left > 0) {
+          rewardText.textContent = left + '초 후 보상이 지급됩니다';
+        } else {
+          clearInterval(timer);
+          rewardText.textContent = '보상 지급 완료!';
+          rewardClose.textContent = '닫고 랭킹 등록하기';
+          reward.classList.add('is-complete');
+        }
+      }, 1000);
+      rewardClose.onclick = () => {
+        if (done) return;
+        done = true;
+        clearInterval(timer);
+        reward.style.display = 'none';
+        setTimeout(() => callback(left <= 0), 0);
+      };
+    },
+  };
+})();
+</script>
+
+<script src="index.js"></script>
+<script>
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":4208852,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_THREADS_ENABLED = false;
+const engine = new Engine(GODOT_CONFIG);
+
+(function () {
+  const status = document.getElementById('status');
+  const progress = document.getElementById('status-progress');
+  const notice = document.getElementById('status-notice');
+
+  function fail(err) {
+    progress.style.display = 'none';
+    notice.style.display = 'block';
+    notice.textContent = (err && err.message) ? err.message : String(err);
+    console.error(err);
+  }
+
+  const missing = Engine.getMissingFeatures({ threads: GODOT_THREADS_ENABLED });
+  if (missing.length !== 0) {
+    fail('이 브라우저에서 필요한 기능이 없습니다:\n' + missing.join('\n'));
+    return;
+  }
+  engine.startGame({
+    onProgress(current, total) {
+      if (total > 0) { progress.value = current; progress.max = total; }
+      else { progress.removeAttribute('value'); progress.removeAttribute('max'); }
+    },
+  }).then(() => { status.style.display = 'none'; }, fail);
+}());
+</script>
+</body>
+</html>
+
